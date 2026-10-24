@@ -1,6 +1,6 @@
 {
   "name": "magpie-orcaterm-auth",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "Magpie/OpenCode provider plugin: OrcaTerm AI assistant (9 models, WeChat QR login)",
   "type": "module",
   "main": "./index.mjs",

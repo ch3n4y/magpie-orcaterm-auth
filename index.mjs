@@ -70,11 +70,19 @@ export const OrcaTermAuthPlugin = async (_input, options) => {
           label: "微信扫码登录（自动接收回调）",
           async authorize() {
             const login = await startWechatLogin();
-            const cap = createLocalCapture({ qrUrl: login.url, state: login.state });
+            const cap = createLocalCapture({
+              appid: login.appid,
+              redirectUri: login.redirectUri,
+              state: login.state,
+            });
             const pageUrl = await cap.ready;
             return {
               url: pageUrl,
-              instructions: "在浏览器里用微信扫码即可，扫完会自动继续，无需复制任何链接。",
+              instructions:
+                "在浏览器里用微信扫码即可，扫完会自动继续，无需复制任何链接。" +
+                (process.env.ORCATERM_CAPTURE_BASE
+                  ? `（当前页面地址来自 ORCATERM_CAPTURE_BASE）`
+                  : "（magpie 装在远端时，先 ssh -L 14300:127.0.0.1:14300 再打开该地址）"),
               method: "auto",
               async callback() {
                 try {

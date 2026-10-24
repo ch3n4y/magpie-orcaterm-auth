@@ -38,12 +38,38 @@ magpie plugin add ./magpie-orcaterm-auth
 
 ### 1. 微信扫码登录（自动接收回调）
 
-插件在本地起一个一次性页面（`127.0.0.1:<随机端口>/login`），页面内嵌微信扫码页，
-扫码后微信回跳 `orcaterm.com/oauth/wechat/bridge?code=…&state=…`，
-该页把结果 `postMessage` 给父窗口 —— 也就是我们的本地页面，于是自动完成登录。
-**不需要复制任何 URL**，也就不存在「state 被别人抢先消费」的问题。
+插件在本地起一个一次性页面（默认 `http://127.0.0.1:14300/login`）：
 
-> 之所以能内嵌：`open.weixin.qq.com/connect/qrconnect` 没有 `X-Frame-Options` /
+- 页面用官方 `wxLogin.js` 渲染二维码，并设 **`self_redirect: true`** ——
+  扫码后微信的回跳发生在**内层 iframe** 里（默认行为是顶层跳转，会把宿主页面整个换掉，
+  于是 postMessage 收不到，这就是之前「登录后直接跳到 bridge URL」的原因）；
+- 回跳落在 `orcaterm.com/oauth/wechat/bridge?code=…&state=…`，该页把结果
+  `postMessage` 给父窗口 —— 正是我们的页面，于是插件立刻拿到 code 并兑换。
+
+**不需要复制任何 URL**，也就不存在「state / code 被抢先消费」的问题。
+
+#### 装在远端 / 通过 Web 访问时
+
+插件在 magpie 所在机器上监听 `127.0.0.1:14300`，而你的浏览器在本地，够不到远端回环地址。
+两种办法任选：
+
+```bash
+# A. SSH 隧道（推荐，不用暴露端口）
+ssh -L 14300:127.0.0.1:14300 <server>
+# 然后浏览器打开 http://127.0.0.1:14300/login
+```
+
+```bash
+# B. 直接对外监听（注意网络暴露面，配合防火墙/反代使用）
+ORCATERM_CAPTURE_HOST=0.0.0.0 ORCATERM_CAPTURE_BASE=https://magpie.example.com magpie ...
+# 或者只改页面基址：
+ORCATERM_CAPTURE_BASE=https://magpie.example.com:14300 magpie ...
+```
+
+可用环境变量：`ORCATERM_CAPTURE_PORT`（默认 14300，占用时自动换随机端口）、
+`ORCATERM_CAPTURE_HOST`（默认 `127.0.0.1`）、`ORCATERM_CAPTURE_BASE`（页面地址前缀）。
+
+> 之所以能内嵌：`open.weixin.qq.com` 的登录页没有 `X-Frame-Options` /
 > CSP `frame-ancestors`；OrcaTerm 网页版用的就是这个机制。
 
 ### 2. 自动读取本机登录态
