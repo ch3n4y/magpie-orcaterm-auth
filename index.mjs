@@ -116,7 +116,9 @@ export const OrcaTermAuthPlugin = async (_input, options) => {
             if (!token) {
               return {
                 type: "failed",
-                error: `没找到本机登录态（${storePath() ?? "data.bin 不存在"}），请先在 OrcaTerm 里登录，或改用「粘贴 token」`,
+                error: storePath()
+                  ? `本机 data.bin 里没有 token（OrcaTerm 似乎已登出），请先在 OrcaTerm 里重新登录，或改用「粘贴 oauth_access_token」`
+                  : "没找到 OrcaTerm 的 data.bin，请先在 OrcaTerm 里登录，或改用「粘贴 oauth_access_token」",
               };
             }
             const exp = looksJwt
@@ -145,44 +147,27 @@ export const OrcaTermAuthPlugin = async (_input, options) => {
           },
         },
         {
+          // 注意：magpie 不会把 api 方式输入框里的 key 传给 authorize（实测 inputs 为空），
+          // 所以 token 必须做成 prompt 才能拿到。
           type: "api",
           label: "粘贴 oauth_access_token",
-          placeholder: "eyJhbGciOi…",
+          placeholder: "留空即可，token 在下一步输入",
           prompts: [
             {
-              type: "select",
-              key: "assistant",
-              message: "Assistant（服务端人格）",
-              options: ASSISTANTS.map((a) => ({
-                label: a === "orcaterm" ? "orcaterm（终端运维助手）" : a,
-                value: a,
-              })),
-            },
-            {
-              type: "select",
-              key: "mode",
-              message: "Mode",
-              options: [
-                { label: "RE_ACT (0)", value: "0" },
-                { label: "PLAN_ACT (1)", value: "1" },
-                { label: "AUTO_ACT (2)", value: "2" },
-              ],
-            },
-            {
               type: "password",
-              key: "cookie",
-              message: "Cookie（含 skey 时才需要，用于 csrfCode；可留空）",
-            },
-            {
-              type: "text",
-              key: "baseUrl",
-              message: "baseUrl（留空用默认）",
-              placeholder: DEFAULT_BASE_URL,
+              key: "token",
+              message: "粘贴 oauth_access_token（JWT，data.bin 里的那一串）",
             },
           ],
-          async authorize(inputs) {
-            const token = inputs?.key;
-            if (!token) return { type: "failed", error: "缺少 oauth_access_token" };
+          async authorize(inputs = {}) {
+            const token = String(inputs?.token ?? inputs?.key ?? "").trim();
+            if (!token) return { type: "failed", error: "没有收到 token" };
+            if (!/^eyJ[A-Za-z0-9_-]{8,}/.test(token)) {
+              return {
+                type: "failed",
+                error: "这不像 JWT，请粘贴 data.bin 里的 oauth_access_token（以 eyJ 开头）",
+              };
+            }
             const exp = tokenExpiryMs(token);
             if (exp && exp < Date.now()) {
               return { type: "failed", error: "这个 token 已经过期了" };
@@ -191,12 +176,12 @@ export const OrcaTermAuthPlugin = async (_input, options) => {
               type: "success",
               key: token,
               metadata: {
-                assistant: inputs.assistant || "orcaterm",
-                mode: inputs.mode || MODES.RE_ACT,
-                baseUrl: inputs.baseUrl || DEFAULT_BASE_URL,
+                assistant: "orcaterm",
+                mode: MODES.RE_ACT,
+                baseUrl: DEFAULT_BASE_URL,
                 userId: userIdFromToken(token),
                 expires: exp ?? undefined,
-                cookie: inputs.cookie || "",
+                cookie: "",
                 via: "manual",
               },
             };
@@ -211,7 +196,6 @@ export const OrcaTermAuthPlugin = async (_input, options) => {
       async refresh(auth) {
         if (auth?.metadata?.via !== "local-store") return null;
         const local = readLocalAuth();
-        if (!local || !local.token) return null;
         if (!local || !local.token) return null;
         const same = local.token === (auth?.access ?? auth?.key);
         const exp = local.expiresAt ?? tokenExpiryMs(local.token);
