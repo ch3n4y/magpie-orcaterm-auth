@@ -1,4 +1,4 @@
-# opencode-orcaterm-auth
+# magpie-orcaterm-auth
 
 把 **OrcaTerm（腾讯云遨驰终端）内置 AI** 接成 Magpie / OpenCode 供应商的插件，支持它面板里的全部模型（DeepSeek-V4 / GLM-5.3 / Hunyuan / Kimi-K3）。
 
@@ -15,18 +15,57 @@
 - **请求仿冒**：请求头与 body 形状与官方客户端同形
 - **信封解析**：把上游的 `action:completion/ask` 动作信封拍平成正常回答，`thinking` 映射为 `reasoning_content`
 
-## 快速开始
+## 安装
+
+仓库根就是插件包，直接把仓库地址加进 magpie：
 
 ```bash
-git clone <this repo>
-magpie plugin add ./plugin
-magpie plugin login orcaterm     # 选「微信扫码登录」或「自动读取本机登录态」
+magpie plugin add ch3n4y/magpie-orcaterm-auth
+magpie plugin login orcaterm
 magpie provider test orcaterm
 ```
 
-然后 agent 里就能用 `orcaterm/deepseek-v4-flash` 这类模型了。
+或者本地克隆后就地加载：
 
-详细说明见 [`plugin/README.md`](plugin/README.md)。
+```bash
+git clone https://github.com/ch3n4y/magpie-orcaterm-auth
+magpie plugin add ./magpie-orcaterm-auth
+```
+
+装好后 agent 里就能用 `orcaterm/deepseek-v4-flash` 这类模型。
+
+## 登录
+
+### 1. 微信扫码登录
+
+插件走 OrcaTerm 自己的 OAuth：
+
+1. `GET https://orcaterm.com/oauth/wechat/config` → `{appid, redirect_uri, state, scope}`
+2. 拼出微信扫码页 `https://open.weixin.qq.com/connect/qrconnect?...`，magpie 打开它
+3. 用微信扫码；微信回跳 `https://orcaterm.com/oauth/wechat/bridge?code=…&state=…`
+   （那是个 `postMessage` 桥页，桌面端用 iframe 接；插件这边请把地址栏完整 URL 贴回来）
+4. 插件 `POST /oauth/wechat/exchange {code, state}` 换到 accessToken
+
+错误码与客户端一致：`STATE_EXPIRED` / `STATE_MISMATCH` / `INVALID_REQUEST` / `PROVIDER_DISABLED` / `INTERNAL_ERROR`。
+
+### 2. 自动读取本机登录态
+
+直接读 OrcaTerm 桌面端的持久化 store：
+
+```
+~/Library/Application Support/com.orcaterm-desktop.app/data.bin
+```
+
+取 `oauth_access_token` / `oauth_expires_at` / `userId`。用 `ORCATERM_STORE` 可指向别的路径。
+token 已过期时登录会直接失败，提示先去 OrcaTerm 里刷新。
+
+### 3. 粘贴 token
+
+手动粘贴 `oauth_access_token`，并选 assistant / mode / 可选 cookie 与 baseUrl。
+插件会用 JWT 的 `exp` 先做一次过期预检。
+
+**续期**：上游没有可用的 refresh 端点（桌面端在 Rust 侧续 token 并回写 `data.bin`）。
+只有「自动读取本机登录态」方式支持续期（重读 store）；扫码 / 手动粘贴的账号过期后需重新登录。
 
 ## 模型
 
@@ -69,22 +108,40 @@ Content-Type: application/json
 - 上游**没有多轮记忆**，历史要自己压平重放
 - 限流 **10 RPM/账号**，打满返回的是 `HTTP 200` + `application/json`（不是 SSE）
 
+## 风控与校验
+
+上游打满限流时的返回（注意状态码仍是 200）：
+
+```json
+{"code":429,"data":null,"message":"Rate limit exceeded: chat-rpm"}
+```
+
+插件的处理：滑动窗口主动控速（默认 10/60s，选项 `rateLimitPerMinute` 可调低）、
+收到 429 记录冷却并指数退避重试（最多 2 次）、每次响应用 `X-RateLimit-*` 校正窗口、
+`package.json` 里 `maxConcurrency: 1` 串行发送。
+
+服务端真正硬校验的只有三条，插件在发出前就守住（避免无谓消耗配额）：
+
+| 字段 | 规则 | 不守的后果 |
+|---|---|---|
+| `input.id` | UUID v4 | `[LLM_ERROR]: Invalid inputId` |
+| `conversationId` | 非空、非 `"unknown"` | `[LLM_ERROR]: Invalid conversationId: unknown.` |
+| `mode` | `0` / `1` / `2` | 服务端 handler 分派崩溃 `code:500` |
+
 ## 仓库结构
 
 ```
-plugin/                 Magpie / OpenCode v1 供应商插件
-  index.mjs             钩子：config / auth（3 种登录）/ loader.fetch / provider.models
-  lib/protocol.mjs      参数校验、请求构造、信封解析、错误判别
-  lib/wechat-oauth.mjs  微信扫码登录
-  lib/local-auth.mjs    读取本机 OrcaTerm 登录态
-  lib/rate-limit.mjs    滑动窗口 + 429 冷却
-  test/run.mjs          自测（pacer / wechat / auto / stream / nostream）
+index.mjs              钩子：config / auth（3 种登录）/ loader.fetch / provider.models
+lib/protocol.mjs       参数校验、请求构造、信封解析、错误判别
+lib/wechat-oauth.mjs   微信扫码登录
+lib/local-auth.mjs     读取本机 OrcaTerm 登录态
+lib/rate-limit.mjs     滑动窗口 + 429 冷却
+test/run.mjs           自测（pacer / wechat / auto / stream / nostream）
 ```
 
 ## 自测
 
 ```bash
-cd plugin
 node test/run.mjs pacer          # 限流器单测，不发网络
 node test/run.mjs wechat         # 打印微信二维码 URL
 node test/run.mjs auto           # 用本机登录态跑一次真实请求
