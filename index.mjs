@@ -373,11 +373,12 @@ export const OrcaTermAuthPlugin = async (_input, options) => {
 };
 
 function wechatSuccess(r) {
+  // 注意：magpie 只有在结果里带 `key` 时才会把登录态写进 plugin-auth.json
+  // （带 access+refresh 才算 oauth 凭据；只给 access 会被丢弃，表现为
+  //  CLI 说 signed in、但下次查询又变成 not signed in）。
   return {
     type: "success",
-    access: r.accessToken,
-    expires: r.expiresAt ?? undefined,
-    accountId: r.providerUsername || r.userId,
+    key: r.accessToken,
     metadata: {
       via: "wechat-qr",
       assistant: "orcaterm",
@@ -386,6 +387,7 @@ function wechatSuccess(r) {
       userId: r.userId,
       nickname: r.providerUsername,
       avatar: r.avatar,
+      expires: r.expiresAt ?? undefined,
       cookie: "",
     },
   };
