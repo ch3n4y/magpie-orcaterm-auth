@@ -1,0 +1,13 @@
+{
+  "name": "opencode-orcaterm-auth",
+  "version": "0.1.0",
+  "description": "OpenCode/Magpie provider plugin: OrcaTerm AI assistant",
+  "type": "module",
+  "main": "./index.mjs",
+  "files": ["index.mjs", "lib/*.mjs", "README.md"],
+  "keywords": ["opencode", "opencode-plugin", "magpie", "orcaterm"],
+  "license": "MIT",
+  "magpie": {
+    "maxConcurrency": 1
+  }
+}
