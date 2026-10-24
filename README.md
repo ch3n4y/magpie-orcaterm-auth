@@ -59,6 +59,9 @@ magpie plugin add ./magpie-orcaterm-auth
 取 `oauth_access_token` / `oauth_expires_at` / `userId`。用 `ORCATERM_STORE` 可指向别的路径。
 token 已过期时登录会直接失败，提示先去 OrcaTerm 里刷新。
 
+> CLI 提示：`magpie plugin login orcaterm` 选到这一项后仍会要求输入一行 key（这是 magpie 对
+> `api` 类型方式的固定行为），随便输入一个字符回车即可；直接粘贴一个 token 也可以，插件会识别出来并用它。
+
 ### 3. 粘贴 token
 
 手动粘贴 `oauth_access_token`，并选 assistant / mode / 可选 cookie 与 baseUrl。

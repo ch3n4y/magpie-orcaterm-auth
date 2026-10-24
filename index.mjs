@@ -99,36 +99,46 @@ export const OrcaTermAuthPlugin = async (_input, options) => {
           },
         },
         {
-          // 不提问 -> inputs 为 undefined，直接读本机 store
+          // 不提问 -> inputs 通常为 undefined，直接读本机 store。
+          // 但 CLI 对 api 类型强制读一行 key（空则 EOF 报错），所以这里也接受
+          // 直接粘贴的 token：看着像 JWT 就用它，否则一律回落到本机 store。
           type: "api",
           label: "自动读取本机 OrcaTerm 登录态",
-          placeholder: "无需填写，点确认即可",
-          async authorize() {
+          placeholder: "无需填写（CLI 里随便输一个字符即可），也可直接粘 token",
+          async authorize(inputs) {
+            const typed = String(
+              inputs?.key ?? inputs?.token ?? (typeof inputs === "string" ? inputs : "") ?? "",
+            ).trim();
+            const looksJwt = /^eyJ[A-Za-z0-9_-]{8,}/.test(typed);
             const local = readLocalAuth();
-            if (!local) {
+            const token = looksJwt ? typed : local?.token;
+
+            if (!token) {
               return {
                 type: "failed",
                 error: `没找到本机登录态（${storePath() ?? "data.bin 不存在"}），请先在 OrcaTerm 里登录，或改用「粘贴 token」`,
               };
             }
-            const exp = local.expiresAt ?? tokenExpiryMs(local.token);
+            const exp = looksJwt
+              ? tokenExpiryMs(typed)
+              : (local.expiresAt ?? tokenExpiryMs(token));
             if (exp && exp < Date.now()) {
               return {
                 type: "failed",
-                error: "本机 token 已过期，请先打开 OrcaTerm 让它刷新一下，再重试",
+                error: "token 已过期，请先打开 OrcaTerm 让它刷新一下，再重试",
               };
             }
             return {
               type: "success",
-              key: local.token,
+              key: token,
               metadata: {
                 assistant: "orcaterm",
                 mode: MODES.RE_ACT,
                 baseUrl: DEFAULT_BASE_URL,
-                userId: local.userId || userIdFromToken(local.token),
+                userId: (looksJwt ? "" : local.userId) || userIdFromToken(token),
                 expires: exp ?? undefined,
-                source: local.source,
-                via: "local-store",
+                source: looksJwt ? "pasted" : local.source,
+                via: looksJwt ? "manual" : "local-store",
                 cookie: "",
               },
             };
