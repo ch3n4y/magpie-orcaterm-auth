@@ -64,8 +64,17 @@ token 已过期时登录会直接失败，提示先去 OrcaTerm 里刷新。
 
 ### 3. 粘贴 token
 
-手动粘贴 `oauth_access_token`，并选 assistant / mode / 可选 cookie 与 baseUrl。
-插件会用 JWT 的 `exp` 先做一次过期预检。
+插件会弹一个 password 输入框，把 `oauth_access_token`（`data.bin` 里那一串，以 `eyJ` 开头）粘进去。
+插件会用 JWT 的 `exp` 做一次过期预检。
+
+> magpie 不会把 `api` 方式输入框里的 key 传给插件（实测 `authorize` 收到的只有 prompt 答案），
+> 所以 token 是作为 prompt 收的。CLI 里的输入顺序是「先 prompt、后 key」：
+>
+> ```bash
+> magpie plugin login orcaterm   # 输入 3
+> # 粘贴 oauth_access_token（JWT…）: ← 这里粘 token
+> # 再要一行 key 时随便输一个字符
+> ```
 
 **续期**：上游没有可用的 refresh 端点（桌面端在 Rust 侧续 token 并回写 `data.bin`）。
 只有「自动读取本机登录态」方式支持续期（重读 store）；扫码 / 手动粘贴的账号过期后需重新登录。
