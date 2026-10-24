@@ -27,11 +27,7 @@ import {
   userIdFromToken,
 } from "./lib/local-auth.mjs";
 import { pacerFor, sleep } from "./lib/rate-limit.mjs";
-import {
-  exchangeCode,
-  parseCallbackInput,
-  startWechatLogin,
-} from "./lib/wechat-oauth.mjs";
+import { exchangeCode, startWechatLogin } from "./lib/wechat-oauth.mjs";
 import { createLocalCapture } from "./lib/wechat-local.mjs";
 
 const PROVIDER = "orcaterm";
@@ -92,23 +88,6 @@ export const OrcaTermAuthPlugin = async (_input, options) => {
           },
         },
         {
-          // 兜底：自动接收被挡住时，把回调 URL 贴回来。
-          type: "oauth",
-          label: "微信扫码（手动粘贴回调 URL）",
-          async authorize() {
-            const login = await startWechatLogin();
-            return {
-              url: login.url,
-              instructions: login.instructions,
-              method: "code",
-              async callback(input) {
-                const { code, state } = parseCallbackInput(input, login.state);
-                return wechatSuccess(await exchangeCode({ code, state }));
-              },
-            };
-          },
-        },
-        {
           // 不提问 -> inputs 通常为 undefined，直接读本机 store。
           // 但 CLI 对 api 类型强制读一行 key（空则 EOF 报错），所以这里也接受
           // 直接粘贴的 token：看着像 JWT 就用它，否则一律回落到本机 store。
@@ -152,47 +131,6 @@ export const OrcaTermAuthPlugin = async (_input, options) => {
                 source: looksJwt ? "pasted" : local.source,
                 via: looksJwt ? "manual" : "local-store",
                 cookie: "",
-              },
-            };
-          },
-        },
-        {
-          // 注意：magpie 不会把 api 方式输入框里的 key 传给 authorize（实测 inputs 为空），
-          // 所以 token 必须做成 prompt 才能拿到。
-          type: "api",
-          label: "粘贴 oauth_access_token",
-          placeholder: "留空即可，token 在下一步输入",
-          prompts: [
-            {
-              type: "password",
-              key: "token",
-              message: "粘贴 oauth_access_token（JWT，data.bin 里的那一串）",
-            },
-          ],
-          async authorize(inputs = {}) {
-            const token = String(inputs?.token ?? inputs?.key ?? "").trim();
-            if (!token) return { type: "failed", error: "没有收到 token" };
-            if (!/^eyJ[A-Za-z0-9_-]{8,}/.test(token)) {
-              return {
-                type: "failed",
-                error: "这不像 JWT，请粘贴 data.bin 里的 oauth_access_token（以 eyJ 开头）",
-              };
-            }
-            const exp = tokenExpiryMs(token);
-            if (exp && exp < Date.now()) {
-              return { type: "failed", error: "这个 token 已经过期了" };
-            }
-            return {
-              type: "success",
-              key: token,
-              metadata: {
-                assistant: "orcaterm",
-                mode: MODES.RE_ACT,
-                baseUrl: DEFAULT_BASE_URL,
-                userId: userIdFromToken(token),
-                expires: exp ?? undefined,
-                cookie: "",
-                via: "manual",
               },
             };
           },

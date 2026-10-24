@@ -9,7 +9,7 @@
 ## 特性
 
 - **9 个模型**：`deepseek-v4-pro` / `deepseek-v4-flash` / `deepseek-v4.1-flash` / `glm-5.3` / `glm-5.3-flash` / `glm-5.2` / `kimi`(K3) / `hunyuan`(Hy3) / `hunyuan4`(Hy4-preview)
-- **三种登录**：微信扫码（OAuth）/ 自动读取本机 OrcaTerm 登录态 / 手动粘贴 token
+- **两种登录**：微信扫码（OAuth，自动接收回调）/ 自动读取本机 OrcaTerm 登录态
 - **风控对齐**：按上游 `X-RateLimit-*` 主动控速（10 RPM）+ 429 退避重试 + 串行发送
 - **参数校验**：发出前守住 UUID v4、conversationId、mode 枚举三条硬校验
 - **请求仿冒**：请求头与 body 形状与官方客户端同形
@@ -46,15 +46,7 @@ magpie plugin add ./magpie-orcaterm-auth
 > 之所以能内嵌：`open.weixin.qq.com/connect/qrconnect` 没有 `X-Frame-Options` /
 > CSP `frame-ancestors`；OrcaTerm 网页版用的就是这个机制。
 
-### 2. 微信扫码（手动粘贴回调 URL）
-
-自动接收被浏览器扩展或网络策略挡住时的兜底：扫码后把回调页地址栏的整条 URL 贴回来。
-
-> 注意：微信的 `code` 与 `state` 都是**一次性**的，谁先兑换谁生效，且约 5 分钟内有效。
-> 如果 OrcaTerm 客户端也在登录流程里，可能先一步把 code 用掉 —— 这就是优先用「自动接收」的原因。
-
-
-### 3. 自动读取本机登录态
+### 2. 自动读取本机登录态
 
 直接读 OrcaTerm 桌面端的持久化 store：
 
@@ -66,24 +58,10 @@ magpie plugin add ./magpie-orcaterm-auth
 token 已过期时登录会直接失败，提示先去 OrcaTerm 里刷新。
 
 > CLI 提示：`magpie plugin login orcaterm` 选到这一项后仍会要求输入一行 key（这是 magpie 对
-> `api` 类型方式的固定行为），随便输入一个字符回车即可；直接粘贴一个 token 也可以，插件会识别出来并用它。
-
-### 4. 粘贴 token
-
-插件会弹一个 password 输入框，把 `oauth_access_token`（`data.bin` 里那一串，以 `eyJ` 开头）粘进去。
-插件会用 JWT 的 `exp` 做一次过期预检。
-
-> magpie 不会把 `api` 方式输入框里的 key 传给插件（实测 `authorize` 收到的只有 prompt 答案），
-> 所以 token 是作为 prompt 收的。CLI 里的输入顺序是「先 prompt、后 key」：
->
-> ```bash
-> magpie plugin login orcaterm   # 输入 3
-> # 粘贴 oauth_access_token（JWT…）: ← 这里粘 token
-> # 再要一行 key 时随便输一个字符
-> ```
+> `api` 类型方式的固定行为），随便输入一个字符回车即可。
 
 **续期**：上游没有可用的 refresh 端点（桌面端在 Rust 侧续 token 并回写 `data.bin`）。
-只有「自动读取本机登录态」方式支持续期（重读 store）；扫码 / 手动粘贴的账号过期后需重新登录。
+只有「自动读取本机登录态」方式支持续期（重读 store）；扫码登录的账号过期后需重新扫码。
 
 ## 模型
 
