@@ -32,6 +32,7 @@ import {
   parseCallbackInput,
   startWechatLogin,
 } from "./lib/wechat-oauth.mjs";
+import { createLocalCapture } from "./lib/wechat-local.mjs";
 
 const PROVIDER = "orcaterm";
 const MAX_RETRIES = 2;
@@ -66,9 +67,34 @@ export const OrcaTermAuthPlugin = async (_input, options) => {
       provider: PROVIDER,
       methods: [
         {
-          // 微信扫码：authorize 里发起，callback 里用粘贴回来的 code 换 token
+          // 微信扫码（自动）：本地起一个页面内嵌 qrconnect，回调通过 postMessage
+          // 直接收回。用户只需扫码，不用复制任何 URL，也就不存在「state 被别人
+          // 抢先消费」的窗口。
           type: "oauth",
-          label: "微信扫码登录",
+          label: "微信扫码登录（自动接收回调）",
+          async authorize() {
+            const login = await startWechatLogin();
+            const cap = createLocalCapture({ qrUrl: login.url, state: login.state });
+            const pageUrl = await cap.ready;
+            return {
+              url: pageUrl,
+              instructions: "在浏览器里用微信扫码即可，扫完会自动继续，无需复制任何链接。",
+              method: "auto",
+              async callback() {
+                try {
+                  const { code, state } = await cap.wait;
+                  return wechatSuccess(await exchangeCode({ code, state }));
+                } finally {
+                  cap.close();
+                }
+              },
+            };
+          },
+        },
+        {
+          // 兜底：自动接收被挡住时，把回调 URL 贴回来。
+          type: "oauth",
+          label: "微信扫码（手动粘贴回调 URL）",
           async authorize() {
             const login = await startWechatLogin();
             return {
@@ -77,23 +103,7 @@ export const OrcaTermAuthPlugin = async (_input, options) => {
               method: "code",
               async callback(input) {
                 const { code, state } = parseCallbackInput(input, login.state);
-                const r = await exchangeCode({ code, state });
-                return {
-                  type: "success",
-                  access: r.accessToken,
-                  expires: r.expiresAt ?? undefined,
-                  accountId: r.providerUsername || r.userId,
-                  metadata: {
-                    via: "wechat-qr",
-                    assistant: "orcaterm",
-                    mode: MODES.RE_ACT,
-                    baseUrl: DEFAULT_BASE_URL,
-                    userId: r.userId,
-                    nickname: r.providerUsername,
-                    avatar: r.avatar,
-                    cookie: "",
-                  },
-                };
+                return wechatSuccess(await exchangeCode({ code, state }));
               },
             };
           },
@@ -415,6 +425,25 @@ export const OrcaTermAuthPlugin = async (_input, options) => {
     },
   };
 };
+
+function wechatSuccess(r) {
+  return {
+    type: "success",
+    access: r.accessToken,
+    expires: r.expiresAt ?? undefined,
+    accountId: r.providerUsername || r.userId,
+    metadata: {
+      via: "wechat-qr",
+      assistant: "orcaterm",
+      mode: MODES.RE_ACT,
+      baseUrl: DEFAULT_BASE_URL,
+      userId: r.userId,
+      nickname: r.providerUsername,
+      avatar: r.avatar,
+      cookie: "",
+    },
+  };
+}
 
 function completionResponse({ model, content, reasoning }) {
   return new Response(

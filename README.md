@@ -36,19 +36,25 @@ magpie plugin add ./magpie-orcaterm-auth
 
 ## 登录
 
-### 1. 微信扫码登录
+### 1. 微信扫码登录（自动接收回调）
 
-插件走 OrcaTerm 自己的 OAuth：
+插件在本地起一个一次性页面（`127.0.0.1:<随机端口>/login`），页面内嵌微信扫码页，
+扫码后微信回跳 `orcaterm.com/oauth/wechat/bridge?code=…&state=…`，
+该页把结果 `postMessage` 给父窗口 —— 也就是我们的本地页面，于是自动完成登录。
+**不需要复制任何 URL**，也就不存在「state 被别人抢先消费」的问题。
 
-1. `GET https://orcaterm.com/oauth/wechat/config` → `{appid, redirect_uri, state, scope}`
-2. 拼出微信扫码页 `https://open.weixin.qq.com/connect/qrconnect?...`，magpie 打开它
-3. 用微信扫码；微信回跳 `https://orcaterm.com/oauth/wechat/bridge?code=…&state=…`
-   （那是个 `postMessage` 桥页，桌面端用 iframe 接；插件这边请把地址栏完整 URL 贴回来）
-4. 插件 `POST /oauth/wechat/exchange {code, state}` 换到 accessToken
+> 之所以能内嵌：`open.weixin.qq.com/connect/qrconnect` 没有 `X-Frame-Options` /
+> CSP `frame-ancestors`；OrcaTerm 网页版用的就是这个机制。
 
-错误码与客户端一致：`STATE_EXPIRED` / `STATE_MISMATCH` / `INVALID_REQUEST` / `PROVIDER_DISABLED` / `INTERNAL_ERROR`。
+### 2. 微信扫码（手动粘贴回调 URL）
 
-### 2. 自动读取本机登录态
+自动接收被浏览器扩展或网络策略挡住时的兜底：扫码后把回调页地址栏的整条 URL 贴回来。
+
+> 注意：微信的 `code` 与 `state` 都是**一次性**的，谁先兑换谁生效，且约 5 分钟内有效。
+> 如果 OrcaTerm 客户端也在登录流程里，可能先一步把 code 用掉 —— 这就是优先用「自动接收」的原因。
+
+
+### 3. 自动读取本机登录态
 
 直接读 OrcaTerm 桌面端的持久化 store：
 
@@ -62,7 +68,7 @@ token 已过期时登录会直接失败，提示先去 OrcaTerm 里刷新。
 > CLI 提示：`magpie plugin login orcaterm` 选到这一项后仍会要求输入一行 key（这是 magpie 对
 > `api` 类型方式的固定行为），随便输入一个字符回车即可；直接粘贴一个 token 也可以，插件会识别出来并用它。
 
-### 3. 粘贴 token
+### 4. 粘贴 token
 
 插件会弹一个 password 输入框，把 `oauth_access_token`（`data.bin` 里那一串，以 `eyJ` 开头）粘进去。
 插件会用 JWT 的 `exp` 做一次过期预检。
