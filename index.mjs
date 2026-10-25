@@ -28,6 +28,7 @@ import {
 } from "./lib/local-auth.mjs";
 import { pacerFor, sleep } from "./lib/rate-limit.mjs";
 import { exchangeCode, startWechatLogin } from "./lib/wechat-oauth.mjs";
+import { refreshAccessToken } from "./lib/token-refresh.mjs";
 import { createLocalCapture } from "./lib/wechat-local.mjs";
 
 const PROVIDER = "orcaterm";
@@ -147,29 +148,52 @@ export const OrcaTermAuthPlugin = async (_input, options) => {
       /**
        * 续期：
        *  - via "local-store"：桌面端在 Rust 侧续 token 并回写 data.bin，重读即可；
-       *  - 微信扫码 / 手动粘贴：上游没有 refresh 端点，只能重新登录。
+       *  - 其他（微信扫码）：走 CAPI 的 OAuthRefreshToken，用当前 token 换新 token。
        */
       async refresh(auth) {
-        if (auth?.metadata?.via !== "local-store") return null;
-        const local = readLocalAuth();
-        if (!local || !local.token) return null;
-        const same = local.token === (auth?.access ?? auth?.key);
-        const exp = local.expiresAt ?? tokenExpiryMs(local.token);
-        if (same && exp && exp < Date.now()) {
-          throw Object.assign(
-            new Error("OrcaTerm token 已过期且本机未刷新，请在 OrcaTerm 里重新登录"),
-            { signIn: "expired" },
-          );
+        const meta = auth?.metadata ?? {};
+
+        if (meta.via === "local-store") {
+          const local = readLocalAuth();
+          if (!local || !local.token) return null;
+          const same = local.token === (auth?.access ?? auth?.key);
+          const exp = local.expiresAt ?? tokenExpiryMs(local.token);
+          if (same && exp && exp < Date.now()) {
+            throw Object.assign(
+              new Error("OrcaTerm token 已过期且本机未刷新，请在 OrcaTerm 里重新登录"),
+              { signIn: "expired" },
+            );
+          }
+          if (same) return { key: local.token, access: local.token, expires: exp ?? undefined };
+          return {
+            key: local.token,
+            access: local.token,
+            refresh: local.refreshToken || undefined,
+            expires: exp ?? undefined,
+            metadata: { userId: local.userId || userIdFromToken(local.token) },
+          };
         }
-        if (same) {
-          return { access: local.token, expires: exp ?? undefined };
+
+        const token = auth?.key ?? auth?.access;
+        if (!token) return null;
+        try {
+          const r = await refreshAccessToken(token);
+          const expires = Date.now() + r.expiresIn * 1000;
+          return {
+            key: r.accessToken,
+            access: r.accessToken,
+            expires,
+            metadata: { ...meta, expires },
+          };
+        } catch (err) {
+          // 明确的失效才要求重新登录；网络/网关抖动则保留现有凭据，交给下一轮
+          if (/expired|invalid|失效|过期/i.test(String(err?.message ?? ""))) {
+            throw Object.assign(new Error(`OrcaTerm 续期失败：${err.message}`), {
+              signIn: "expired",
+            });
+          }
+          return null;
         }
-        return {
-          access: local.token,
-          refresh: local.refreshToken || undefined,
-          expires: exp ?? undefined,
-          metadata: { userId: local.userId || userIdFromToken(local.token) },
-        };
       },
 
       async loader(getAuth) {

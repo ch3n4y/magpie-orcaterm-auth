@@ -86,8 +86,14 @@ token 已过期时登录会直接失败，提示先去 OrcaTerm 里刷新。
 > CLI 提示：`magpie plugin login orcaterm` 选到这一项后仍会要求输入一行 key（这是 magpie 对
 > `api` 类型方式的固定行为），随便输入一个字符回车即可。
 
-**续期**：上游没有可用的 refresh 端点（桌面端在 Rust 侧续 token 并回写 `data.bin`）。
-只有「自动读取本机登录态」方式支持续期（重读 store）；扫码登录的账号过期后需重新扫码。
+**续期**：两种方式都支持。
+
+- 微信扫码：走 OrcaTerm 的 CAPI `OAuthRefreshToken` —— 拿当前 token 换一个新的
+  （`POST https://orcaterm.com/cgi/api?action=OAuthRefreshToken`），有效期同样 2 小时，
+  magpie 会在到期前自动续，不需要重新扫码。
+- 自动读取本机登录态：重读 `data.bin`（桌面端在 Rust 侧续 token 并回写该文件）。
+
+只有上游明确返回失效时才会要求重新登录（`signIn: "expired"`）；网络抖动只跳过本轮，保留现有凭据。
 
 ## 模型
 
