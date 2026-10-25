@@ -198,7 +198,7 @@ export const OrcaTermAuthPlugin = async (_input, options) => {
 
       async loader(getAuth) {
         const auth = await getAuth();
-        const token = auth?.key ?? auth?.access ?? "";
+        let token = auth?.key ?? auth?.access ?? "";
         const meta = auth?.metadata ?? {};
         const baseUrl = meta.baseUrl || DEFAULT_BASE_URL;
         const pacer = pacerFor(`orcaterm:${meta.userId || token.slice(-12)}`, {
@@ -225,9 +225,8 @@ export const OrcaTermAuthPlugin = async (_input, options) => {
               return errRes(400, "无法解析请求体", "invalid_request_error");
             }
 
-            let req;
-            try {
-              req = buildChatRequest({
+            const makeReq = () =>
+              buildChatRequest({
                 baseUrl,
                 auth: { token, cookie: meta.cookie, userId: meta.userId },
                 body,
@@ -239,9 +238,25 @@ export const OrcaTermAuthPlugin = async (_input, options) => {
                   language: meta.language,
                 },
               });
+
+            let req;
+            try {
+              req = makeReq();
             } catch (err) {
               return errRes(400, err.message, err.type ?? "invalid_request_error");
             }
+
+            // 一次请求内最多自愈一次，避免死循环
+            let refreshedOnce = false;
+            const tryRefresh = async () => {
+              if (refreshedOnce) return false;
+              refreshedOnce = true;
+              const r = await refreshAccessToken(token).catch(() => null);
+              if (!r) return false;
+              token = r.accessToken;
+              req = makeReq();
+              return true;
+            };
 
             const signal = init?.signal;
             let upstream = null;
@@ -282,12 +297,17 @@ export const OrcaTermAuthPlugin = async (_input, options) => {
                   continue;
                 }
                 if (verdict.kind === "auth") {
+                  if (await tryRefresh()) continue;
                   throw Object.assign(
                     new Error(verdict.error.message || "登录已失效"),
                     { signIn: "expired" },
                   );
                 }
                 if (verdict.kind === "error") {
+                  // 续期会把旧 token 轮换失效，所以碰到「失效」时自愈一次
+                  if (/Invalid or expired AccessToken/i.test(verdict.error.message)) {
+                    if (await tryRefresh()) continue;
+                  }
                   return errRes(502, verdict.error.message, verdict.error.type);
                 }
                 if (verdict.kind === "ok") {
